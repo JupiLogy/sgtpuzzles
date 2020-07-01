@@ -13,6 +13,12 @@
 \cfg{html-contents-depth-1}{2}
 \cfg{html-leaf-contains-contents}{true}
 
+\cfg{chm-filename}{puzzles.chm}
+\cfg{chm-contents-filename}{index.html}
+\cfg{chm-template-filename}{%k.html}
+\cfg{chm-head-end}{<link rel="stylesheet" type="text/css" href="chm.css">}
+\cfg{chm-extra-file}{chm.css}
+
 \cfg{info-filename}{puzzles.info}
 
 \cfg{ps-filename}{puzzles.ps}
@@ -21,7 +27,9 @@
 \define{androidmouse} \e{On Android, please touch for left click and
 long press for right click. Also note that where this manual refers to
 pressing a letter on the keyboard, the Android version has icons at
-the bottom of the screen instead (Control and Shift are not available).}
+the bottom of the screen instead (Control and Shift are not available).
+There is also an optional "Night mode" which uses darker colours in
+low light.}
 
 \define{by} \u00D7{x}
 
@@ -71,13 +79,13 @@ with the game binaries or the code, except pretending you wrote them
 yourself, or suing me if anything goes wrong. 
 
 The most recent versions, and \i{source code}, can be found at
-\I{website}\W{http://www.chiark.greenend.org.uk/~sgtatham/puzzles/}\cw{http://www.chiark.greenend.org.uk/~sgtatham/puzzles/}.
+\I{website}\W{https://www.chiark.greenend.org.uk/~sgtatham/puzzles/}\cw{https://www.chiark.greenend.org.uk/~sgtatham/puzzles/}.
 
 Please report \I{feedback}\i{bugs} to
 \W{mailto:anakin@pobox.com}\cw{anakin@pobox.com}.
 You might find it helpful to read this article before reporting a bug:
 
-\W{http://www.chiark.greenend.org.uk/~sgtatham/bugs.html}\cw{http://www.chiark.greenend.org.uk/~sgtatham/bugs.html}
+\W{https://www.chiark.greenend.org.uk/~sgtatham/bugs.html}\cw{https://www.chiark.greenend.org.uk/~sgtatham/bugs.html}
 
 \ii{Patches} are welcome. Especially if they provide a new front end
 (to make all these games run on another platform), or a new game.
@@ -2452,10 +2460,15 @@ increasingly complex reasoning to avoid having to backtrack.
 \cfg{winhelp-topic}{games.galaxies}
 
 You have a rectangular grid containing a number of dots. Your aim is
-to draw edges along the grid lines which divide the rectangle into
-regions in such a way that every region is 180\u00b0{-degree}
-rotationally symmetric, and contains exactly one dot which is
-located at its centre of symmetry.
+to partition the rectangle into connected regions of squares, in such
+a way that every region is 180\u00b0{-degree} rotationally symmetric,
+and contains exactly one dot which is located at its centre of
+symmetry.
+
+To enter your solution, you draw lines along the grid edges to mark
+the boundaries of the regions. The puzzle is complete when the marked
+lines on the grid are precisely those that separate two squares
+belonging to different regions.
 
 This puzzle was invented by \i{Nikoli} \k{nikoli-galaxies}, under
 the name \q{Tentai Show}; its name is commonly translated into
@@ -2472,11 +2485,11 @@ Galaxies was contributed to this collection by James Harvey.
 \androidmouse
 
 Left-click on any grid line to draw an edge if there isn't one
-already, or to remove one if there is. When you create a valid
-region (one which is closed, contains exactly one dot, is
-180\u00b0{-degree} symmetric about that dot, and contains no
-extraneous edges inside it) it will be highlighted automatically; so
-your aim is to have the whole grid highlighted in that way.
+already, or to remove one if there is. When you create a valid region
+(one which is closed, contains exactly one dot, is 180\u00b0{-degree}
+symmetric about that dot, and contains no extraneous edges between two
+of its own squares), it will be highlighted automatically; so your aim
+is to have the whole grid highlighted in that way.
 
 During solving, you might know that a particular grid square belongs
 to a specific dot, but not be sure of where the edges go and which

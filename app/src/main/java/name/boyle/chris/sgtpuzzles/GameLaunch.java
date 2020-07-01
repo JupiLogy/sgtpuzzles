@@ -14,22 +14,22 @@ public class GameLaunch {
 	private final String params;
 	private final String gameID;
 	private final String seed;
-	private final boolean knownCompleted;
 	private final boolean fromChooser;
 	private final boolean ofLocalState;
+	private final boolean undoingOrRedoing;
 
 	private GameLaunch(final String whichBackend, final String params, final String gameID,
-				final String seed, final Uri uri, final String saved,
-				final boolean knownCompleted, final boolean fromChooser, final boolean ofLocalState) {
+					   final String seed, final Uri uri, final String saved,
+					   final boolean fromChooser, final boolean ofLocalState, boolean undoingOrRedoing) {
 		this.whichBackend = whichBackend;
 		this.params = params;
 		this.gameID = gameID;
 		this.seed = seed;
 		this.uri = uri;
 		this.saved = saved;
-		this.knownCompleted = knownCompleted;
 		this.fromChooser = fromChooser;
 		this.ofLocalState = ofLocalState;
+		this.undoingOrRedoing = undoingOrRedoing;
 	}
 	
 	@Override
@@ -39,11 +39,15 @@ public class GameLaunch {
 	}
 
 	public static GameLaunch ofSavedGame(@NonNull final String saved) {
-		return new GameLaunch(null, null, null, null, null, saved, false, true, false);
+		return new GameLaunch(null, null, null, null, null, saved, true, false, false);
 	}
 
-	public static GameLaunch ofLocalState(@NonNull final String backend, @NonNull final String saved, final boolean knownCompleted, final boolean fromChooser) {
-		return new GameLaunch(backend, null, null, null, null, saved, knownCompleted, fromChooser, true);
+	public static GameLaunch undoingOrRedoingNewGame(@NonNull final String saved) {
+		return new GameLaunch(null, null, null, null, null, saved, true, true, true);
+	}
+
+	public static GameLaunch ofLocalState(@NonNull final String backend, @NonNull final String saved, final boolean fromChooser) {
+		return new GameLaunch(backend, null, null, null, null, saved, fromChooser, true, false);
 	}
 
 	public static GameLaunch toGenerate(@NonNull String whichBackend, @NonNull String params) {
@@ -51,7 +55,7 @@ public class GameLaunch {
 	}
 
 	public static GameLaunch toGenerateFromChooser(@NonNull String whichBackend) {
-		return new GameLaunch(whichBackend, null, null, null, null, null, false, true, false);
+		return new GameLaunch(whichBackend, null, null, null, null, null, true, false, false);
 	}
 
 	public static GameLaunch ofGameID(@NonNull String whichBackend, @NonNull String gameID) {
@@ -67,7 +71,7 @@ public class GameLaunch {
 	}
 
 	public static GameLaunch ofUri(@NonNull final Uri uri) {
-		return new GameLaunch(null, null, null, null, uri, null, false, true, false);
+		return new GameLaunch(null, null, null, null, uri, null, true, false, false);
 	}
 
 	public boolean needsGenerating() {
@@ -105,15 +109,15 @@ public class GameLaunch {
 		return saved;
 	}
 
-	public boolean isKnownCompleted() {
-		return knownCompleted;
-	}
-
 	public boolean isFromChooser() {
 		return fromChooser;
 	}
 
-	public boolean isOfNonLocalState() {
-		return !ofLocalState;
+	public boolean isOfLocalState() {
+		return ofLocalState;
+	}
+
+	public boolean isUndoingOrRedoing() {
+		return undoingOrRedoing;
 	}
 }

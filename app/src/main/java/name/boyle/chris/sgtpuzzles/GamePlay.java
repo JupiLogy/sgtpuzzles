@@ -93,6 +93,9 @@ import java.util.StringTokenizer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static name.boyle.chris.sgtpuzzles.GameView.UI_REDO;
+import static name.boyle.chris.sgtpuzzles.GameView.UI_UNDO;
+
 public class GamePlay extends AppCompatActivity implements OnSharedPreferenceChangeListener, NightModeHelper.Parent
 {
 	static final String TAG = "GamePlay";
@@ -107,8 +110,11 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 	private static final String STAY_AWAKE_KEY = "stayAwake";
 	private static final String UNDO_REDO_KBD_KEY = "undoRedoOnKeyboard";
 	private static final boolean UNDO_REDO_KBD_DEFAULT = true;
+	static final String MOUSE_LONG_PRESS_KEY = "extMouseLongPress";
+	private static final String MOUSE_BACK_KEY = "extMouseBackKey";
 	private static final String PATTERN_SHOW_LENGTHS_KEY = "patternShowLengths";
 	private static final String COMPLETED_PROMPT_KEY = "completedPrompt";
+	private static final String VICTORY_FLASH_KEY = "victoryFlash";
 	private static final String CONTROLS_REMINDERS_KEY = "controlsReminders";
 	private static final String OLD_SAVED_COMPLETED = "savedCompleted";
 	private static final String OLD_SAVED_GAME = "savedGame";
@@ -127,6 +133,8 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 	private static final String LIGHTUP_383_NEED_MIGRATE = "lightup_383_need_migrate";
 	private static final String LIGHTUP_383_PARAMS_ROT4 = "^(\\d+(?:x\\d+)?(?:b\\d+)?)s4(.*)$";
 	private static final String LIGHTUP_383_REPLACE_ROT4 = "$1s3$2";
+	private static final String UNDO_NEW_GAME_SEEN = "undoNewGameSeen";
+	private static final String REDO_NEW_GAME_SEEN = "redoNewGameSeen";
 
 	private ProgressDialog progress;
 	private CountDownTimer progressResetRevealer;
@@ -134,15 +142,17 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 	private SmallKeyboard keyboard;
 	private RelativeLayout mainLayout;
 	private GameView gameView;
-	private Map<String, String> gameTypes;
+	private Map<Integer, String> gameTypesById;
+	private MenuEntry[] gameTypesMenu = new MenuEntry[]{};
 	private int currentType = 0;
 	private boolean workerRunning = false;
 	private Process gameGenProcess = null;
 	private boolean solveEnabled = false, customVisible = false,
-			undoEnabled = false, redoEnabled = false;
+			undoEnabled = false, redoEnabled = false,
+			undoIsLoadGame = false, redoIsLoadGame = false;
+	private String undoToGame = null, redoToGame = null;
 	private SharedPreferences prefs, state;
-	private static final int CFG_SETTINGS = 0, CFG_SEED = 1, CFG_DESC = 2,
-		C_STRING = 0, C_CHOICES = 1, C_BOOLEAN = 2;
+	private static final int CFG_SETTINGS = 0, CFG_SEED = 1, CFG_DESC = 2;
 	static final long MAX_SAVE_SIZE = 1000000; // 1MB; we only have 16MB of heap
 	private boolean gameWantsTimer = false;
 	private static final int TIMER_INTERVAL = 20;
@@ -159,7 +169,7 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 	private static final File storageDir = Environment.getExternalStorageDirectory();
 	private String[] games;
 	private Menu menu;
-	private String maybeUndoRedo = "UR";
+	private String maybeUndoRedo = "" + ((char)UI_UNDO) + ((char)UI_REDO);
 	private boolean startedFullscreen = false, cachedFullscreen = false;
 	private boolean keysAlreadySet = false;
 	private boolean everCompleted = false;
@@ -292,7 +302,8 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 		prefs.registerOnSharedPreferenceChangeListener(this);
 		state = getSharedPreferences(STATE_PREFS_NAME, MODE_PRIVATE);
 		games = getResources().getStringArray(R.array.games);
-		gameTypes = new LinkedHashMap<>();
+		gameTypesById = new LinkedHashMap<>();
+		gameTypesMenu = new MenuEntry[]{};
 
 		applyFullscreen(false);  // must precede super.onCreate and setContentView
 		cachedFullscreen = startedFullscreen = prefs.getBoolean(FULLSCREEN_KEY, false);
@@ -325,6 +336,8 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 		if (prefs.getBoolean(KEYBOARD_BORDERS_KEY, false)) {
 			applyKeyboardBorders();
 		}
+		applyMouseLongPress();
+		applyMouseBackKey();
 		refreshStatusBarColours();
 		getWindow().setBackgroundDrawable(null);
 		setUpBeam();
@@ -384,6 +397,16 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 		if (System.nanoTime() - lastKeySent < 600000000) return;
 		super.onBackPressed();
 		overridePendingTransition(0, 0);
+	}
+
+	@Override
+	public boolean dispatchKeyEvent(@NonNull KeyEvent event) {
+		int keyCode = event.getKeyCode();
+		// Only delegate for MENU key, delegating for other keys might break something(?)
+		if (progress == null && keyCode == KeyEvent.KEYCODE_MENU && gameView.dispatchKeyEvent(event)) {
+			return true;
+		}
+		return super.dispatchKeyEvent(event);
 	}
 
 	@Override
@@ -455,6 +478,9 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 
 		if (backendFromChooser != null) {
 			final String savedGame = state.getString(SAVED_GAME_PREFIX + backendFromChooser, null);
+			// We have a saved game, and if it's completed the user probably wants a fresh one.
+			// Theoretically we could silently load it and ask midend_status() but remembering is
+			// still faster and some people play large games.
 			final boolean wasCompleted = state.getBoolean(SAVED_COMPLETED_PREFIX + backendFromChooser, false);
 			if (savedGame == null || wasCompleted) {
 				Log.d(TAG, "generating as requested");
@@ -462,7 +488,7 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 				return;
 			}
 			Log.d(TAG, "restoring last state of " + backendFromChooser);
-			startGame(GameLaunch.ofLocalState(backendFromChooser, savedGame, false, true));
+			startGame(GameLaunch.ofLocalState(backendFromChooser, savedGame, true));
 		} else {
 			final String savedBackend = state.getString(SAVED_BACKEND, null);
 			if (savedBackend != null) {
@@ -472,8 +498,7 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 					startGame(GameLaunch.toGenerateFromChooser(savedBackend));
 				} else {
 					Log.d(TAG, "normal launch; resuming game of " + savedBackend);
-					final boolean wasCompleted = state.getBoolean(SAVED_COMPLETED_PREFIX + savedBackend, false);
-					startGame(GameLaunch.ofLocalState(savedBackend, savedGame, wasCompleted, false));
+					startGame(GameLaunch.ofLocalState(savedBackend, savedGame, false));
 				}
 			} else {
 				Log.d(TAG, "no state, starting chooser");
@@ -525,7 +550,7 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 	private boolean checkPermissionGrantBug(Uri uri) {
 		// Work around https://code.google.com/p/android-developer-preview/issues/detail?id=2982
 		// We know it's a file:// URI.
-		if (new File(uri.getPath()).canRead()) {
+		if (uri.getPath() == null || new File(uri.getPath()).canRead()) {
 			return false;
 		}
 		new AlertDialog.Builder(this)
@@ -628,7 +653,7 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 		hackForSubmenus = menu;
 		updateUndoRedoEnabled();
 		final MenuItem typeItem = menu.findItem(R.id.type_menu);
-		final boolean enableType = workerRunning || !gameTypes.isEmpty() || customVisible;
+		final boolean enableType = workerRunning || !gameTypesById.isEmpty() || customVisible;
 		typeItem.setEnabled(enableType);
 		typeItem.setVisible(enableType);
 		return true;
@@ -636,13 +661,13 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 
 	private String orientGameType(String type) {
 		if (type == null) return null;
-		boolean screenLandscape = (getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE);
+		boolean viewLandscape = (gameView.w > gameView.h);
 		final Matcher matcher = DIMENSIONS.matcher(type);
 		if (matcher.matches()) {
 			int w = Integer.parseInt(matcher.group(1));
 			int h = Integer.parseInt(matcher.group(3));
 			boolean typeLandscape = (w > h);
-			if (typeLandscape != screenLandscape) {
+			if (typeLandscape != viewLandscape) {
 				return matcher.group(3) + matcher.group(2) + "x" + matcher.group(2) + matcher.group(1) + matcher.group(4);
 			}
 		}
@@ -683,8 +708,8 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 		case android.R.id.home:
 			startChooserAndFinish();
 			break;
-		case R.id.undo:     sendKey(0, 0, 'U'); break;
-		case R.id.redo:     sendKey(0, 0, 'R'); break;
+		case R.id.undo:     sendKey(0, 0, UI_UNDO); break;
+		case R.id.redo:     sendKey(0, 0, UI_REDO); break;
 		default:
 			ret = super.onOptionsItemSelected(item);
 			break;
@@ -747,36 +772,64 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 		gameMenu.show();
 	}
 
+	private final MenuItem.OnMenuItemClickListener TYPE_CLICK_LISTENER = item -> {
+		final int itemId = item.getItemId();
+		if (itemId == R.id.custom) {
+			configEvent(CFG_SETTINGS);
+			return true;
+		} else {
+			final String presetParams = orientGameType(gameTypesById.get(itemId));
+			Log.d(TAG, "preset: " + itemId + ": " + presetParams);
+			startGame(GameLaunch.toGenerate(currentBackend, presetParams));
+			return true;
+		}
+	};
+
 	private void doTypeMenu() {
+		doTypeMenu(gameTypesMenu, true);
+	}
+
+	private void doTypeMenu(final MenuEntry[] menuEntries, final boolean includeCustom) {
 		final PopupMenu typeMenu = new PopupMenu(GamePlay.this, findViewById(R.id.type_menu));
 		typeMenu.getMenuInflater().inflate(R.menu.type_menu, typeMenu.getMenu());
-		int i = 0;
-		for(String title : gameTypes.values()) {
-			if( typeMenu.getMenu().findItem(i) == null ) {
-				typeMenu.getMenu().add(R.id.typeGroup, i, Menu.NONE, orientGameType(title));
-			}
-			i++;
-		}
-		final MenuItem customItem = typeMenu.getMenu().findItem(R.id.custom);
-		customItem.setVisible(customVisible);
-		typeMenu.getMenu().setGroupCheckable(R.id.typeGroup, true, true);
-		if( currentType < 0 ) customItem.setChecked(true);
-		else if( currentType < gameTypes.size() ) typeMenu.getMenu().findItem(currentType).setChecked(true);
-		typeMenu.setOnMenuItemClickListener(item -> {
-			final int itemId = item.getItemId();
-			if (itemId == R.id.custom) {
-				configEvent(CFG_SETTINGS);
-				return true;
-			} else if (itemId < gameTypes.size()) {
-				String presetParams = orientGameType((String) gameTypes.keySet().toArray()[itemId]);
-				Log.d(TAG, "preset: " + itemId + ": " + presetParams);
-				startGame(GameLaunch.toGenerate(currentBackend, presetParams));
-				return true;
+		for (final MenuEntry entry : menuEntries) {
+			if (entry.getParams() != null) {
+				final MenuItem added = typeMenu.getMenu().add(R.id.typeGroup, entry.getId(), Menu.NONE, entry.getTitle());
+				added.setOnMenuItemClickListener(TYPE_CLICK_LISTENER);
+				if (currentType == entry.getId()) {
+					added.setChecked(true);
+				}
 			} else {
-				return false;
+				final MenuItem added = typeMenu.getMenu().add(R.id.typeGroup, entry.getId(), Menu.NONE, entry.getTitle());
+				if (menuContainsCurrent(entry.getSubmenu())) {
+					added.setChecked(true);
+				}
+				added.setOnMenuItemClickListener(item -> {
+					doTypeMenu(entry.getSubmenu(), false);
+					return true;
+				});
 			}
-		});
+		}
+		typeMenu.getMenu().setGroupCheckable(R.id.typeGroup, true, true);
+		if (includeCustom) {
+			final MenuItem customItem = typeMenu.getMenu().findItem(R.id.custom);
+			customItem.setVisible(customVisible);
+			customItem.setOnMenuItemClickListener(TYPE_CLICK_LISTENER);
+			if( currentType < 0 ) customItem.setChecked(true);
+		}
 		typeMenu.show();
+	}
+
+	private boolean menuContainsCurrent(MenuEntry[] submenu) {
+		for (final MenuEntry entry : submenu) {
+			if (entry.getId() == currentType) {
+				return true;
+			}
+			if (entry.getSubmenu() != null && menuContainsCurrent(entry.getSubmenu())) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private void doHelpMenu() {
@@ -863,7 +916,7 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 			targets.add(target);
 		}
 		Intent chooser = Intent.createChooser(targets.remove(targets.size() - 1), getString(R.string.share_title));
-		chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, targets.toArray(new Parcelable[targets.size()]));
+		chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, targets.toArray(new Parcelable[0]));
 		startActivity(chooser);
 	}
 
@@ -995,16 +1048,29 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 
 	private void startGame(final GameLaunch launch)
 	{
+		startGame(launch, false);
+	}
+
+	private void startGame(final GameLaunch launch, final boolean isRedo)
+	{
 		Log.d(TAG, "startGame: " + launch);
 		if (progress != null) {
 			throw new RuntimeException("startGame while already starting!");
 		}
+		final String previousGame;
+		if (isRedo || launch.needsGenerating()) {
+			purgeStates();
+			redoToGame = null;
+			previousGame = saveToString();
+		} else {
+			previousGame = null;
+		}
 		showProgress(launch);
 		stopNative();
-		startGameThread(launch);
+		startGameThread(launch, previousGame);
 	}
 
-	private void startGameThread(final GameLaunch launch) {
+	private void startGameThread(final GameLaunch launch, final String previousGame) {
 		workerRunning = true;
 		(worker = new Thread(launch.needsGenerating() ? "generateAndLoadGame" : "loadGame") { public void run() {
 			try {
@@ -1057,11 +1123,11 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 					} else if (workerRunning) {
 						throw new IOException("Internal error generating game: result is blank");
 					}
-					startGameConfirmed(true, launch);
-				} else if (launch.isOfNonLocalState() && launch.getSaved() != null) {
-					warnOfStateLoss(launch.getSaved(), () -> startGameConfirmed(false, launch), launch.isFromChooser());
+					startGameConfirmed(true, launch, previousGame);
+				} else if (!launch.isOfLocalState() && launch.getSaved() != null) {
+					warnOfStateLoss(launch.getSaved(), () -> startGameConfirmed(false, launch, previousGame), launch.isFromChooser());
 				} else {
-					startGameConfirmed(false, launch);
+					startGameConfirmed(false, launch, previousGame);
 				}
 			} catch (IllegalArgumentException e) {
 				abort(e.getMessage(), launch.isFromChooser());  // probably bogus params
@@ -1072,7 +1138,7 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 		}}).start();
 	}
 
-	private void startGameConfirmed(final boolean generating, final GameLaunch launch) {
+	private void startGameConfirmed(final boolean generating, final GameLaunch launch, final String previousGame) {
 		final String toPlay = launch.getSaved();
 		final String gameID = launch.getGameID();
 		if (toPlay == null && gameID == null) {
@@ -1089,6 +1155,11 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 			}
 		} else {
 			changingGame = ! currentBackend.equals(startingBackend);
+		}
+		if (previousGame != null && !changingGame && !previousGame.equals(toPlay)) {
+			undoToGame = previousGame;
+		} else {
+			undoToGame = null;
 		}
 
 		try {
@@ -1130,7 +1201,9 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 				requestKeys(currentBackend, currentParams);
 			}
 			inertiaFollow(false);
-			if (launch.isKnownCompleted()) {
+			// We have a saved completion flag but completion could have been done; find out whether
+			// it's really completed
+			if (launch.isOfLocalState() && !launch.isUndoingOrRedoing() && isCompletedNow()) {
 				completed();
 			}
 			final boolean hasArrows = computeArrowMode(currentBackend).hasArrows();
@@ -1161,17 +1234,21 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 		return true;
 	}
 
-	private void refreshPresets(String currentParams) {
-		gameTypes.clear();
+	private void refreshPresets(final String currentParams) {
 		currentType = -1;
-		final String[] presets = getPresets();
-		for (int i = 0; i < presets.length/2; i++) {
-			final String encoded = presets[2 * i];
-			final String name = presets[(2 * i) + 1];
-			gameTypes.put(encoded, name);
-			if (currentParams.equals(orientGameType(encoded))) {
-				currentType = i;
-				// TODO if it's only equal modulo orientation; should we put a star by it or something?
+		gameTypesMenu = getPresets();
+		populateGameTypesById(gameTypesMenu, currentParams);
+	}
+
+	private void populateGameTypesById(final MenuEntry[] menuEntries, final String currentParams) {
+		for (final MenuEntry entry : menuEntries) {
+			if (entry.getParams() != null) {
+				gameTypesById.put(entry.getId(), entry.getParams());
+				if (currentParams.equals(orientGameType(entry.getParams()))) {
+					currentType = entry.getId();
+				}
+			} else {
+				populateGameTypesById(entry.getSubmenu(), currentParams);
 			}
 		}
 	}
@@ -1269,10 +1346,33 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 
 	void sendKey(int x, int y, int k)
 	{
+		sendKey(x, y, k, false);
+	}
+
+	void sendKey(int x, int y, int k, boolean isRepeat)
+	{
 		if (progress != null || currentBackend == null) return;
 		if (k == '\f') {
 			// menu button hack
 			openOptionsMenu();
+			return;
+		}
+		if (k == UI_UNDO && undoIsLoadGame) {
+			if (!isRepeat) {
+				Utils.toastFirstFewTimes(this, state, UNDO_NEW_GAME_SEEN, 3, R.string.undo_new_game_toast);
+				final GameLaunch launchUndo = GameLaunch.undoingOrRedoingNewGame(undoToGame);
+				redoToGame = saveToString();
+				startGame(launchUndo);
+			}
+			return;
+		}
+		if (k == UI_REDO && redoIsLoadGame) {
+			if (!isRepeat) {
+				Utils.toastFirstFewTimes(this, state, REDO_NEW_GAME_SEEN, 3, R.string.redo_new_game_toast);
+				final GameLaunch launchRedo = GameLaunch.undoingOrRedoingNewGame(redoToGame);
+				redoToGame = null;
+				startGame(launchRedo, true);
+			}
 			return;
 		}
 		if (swapLR && (k >= GameView.FIRST_MOUSE && k <= GameView.LAST_MOUSE)) {
@@ -1572,75 +1672,77 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 
 	@SuppressLint("InlinedApi")
 	@UsedByJNI
-	void dialogAdd(int whichEvent, int type, String name, String value, int selection)
+	void dialogAddString(int whichEvent, String name, String value)
 	{
 		final Context context = dialogBuilder.getContext();
-		switch(type) {
-		case C_STRING: {
-			dialogIds.add(name);
-			AppCompatEditText et = new AppCompatEditText(context);
-			// TODO: C_INT, C_UINT, C_UDOUBLE, C_DOUBLE
-			// Ugly temporary hack: in custom game dialog, all text boxes are numeric, in the other two dialogs they aren't.
-			// Uglier temporary-er hack: Black Box must accept a range for ball count.
-			if (whichEvent == CFG_SETTINGS && !currentBackend.equals("blackbox")) {
-				et.setInputType(InputType.TYPE_CLASS_NUMBER
-								| InputType.TYPE_NUMBER_FLAG_DECIMAL
-								| InputType.TYPE_NUMBER_FLAG_SIGNED);
-			}
-			et.setTag(name);
-			et.setText(value);
-			et.setWidth(getResources().getDimensionPixelSize((whichEvent == CFG_SETTINGS)
-					? R.dimen.dialog_edit_text_width : R.dimen.dialog_long_edit_text_width));
-			et.setSelectAllOnFocus(true);
-			AppCompatTextView tv = new AppCompatTextView(context);
-			tv.setText(name);
-			tv.setPadding(0, 0, getResources().getDimensionPixelSize(R.dimen.dialog_padding_horizontal), 0);
-			tv.setGravity(Gravity.END);
-			TableRow tr = new TableRow(context);
-			tr.addView(tv);
-			tr.addView(et);
-			tr.setGravity(Gravity.CENTER_VERTICAL);
-			dialogLayout.addView(tr);
-			if (whichEvent == CFG_SEED && value.indexOf('#') == value.length() - 1) {
-				final AppCompatTextView seedWarning = new AppCompatTextView(context);
-				seedWarning.setText(R.string.seedWarning);
-				dialogLayout.addView(seedWarning);
-			}
-			break; }
-		case C_BOOLEAN: {
-			dialogIds.add(name);
-			AppCompatCheckBox c = new AppCompatCheckBox(context);
-			c.setTag(name);
-			c.setText(name);
-			c.setChecked(selection != 0);
-			dialogLayout.addView(c);
-			break; }
-		case C_CHOICES: {
-			StringTokenizer st = new StringTokenizer(value.substring(1),value.substring(0,1));
-			ArrayList<String> choices = new ArrayList<>();
-			while(st.hasMoreTokens()) choices.add(st.nextToken());
-			dialogIds.add(name);
-			AppCompatSpinner s = new AppCompatSpinner(context);
-			s.setTag(name);
-			ArrayAdapter<String> a = new ArrayAdapter<>(context,
-					android.R.layout.simple_spinner_item, choices.toArray(new String[choices.size()]));
-			a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-			s.setAdapter(a);
-			s.setSelection(selection);
-			s.setLayoutParams(new TableRow.LayoutParams(
-					getResources().getDimensionPixelSize(R.dimen.dialog_spinner_width),
-					TableRow.LayoutParams.WRAP_CONTENT));
-			TextView tv = new TextView(context);
-			tv.setText(name);
-			tv.setPadding(0, 0, getResources().getDimensionPixelSize(R.dimen.dialog_padding_horizontal), 0);
-			tv.setGravity(Gravity.END);
-			TableRow tr = new TableRow(context);
-			tr.addView(tv);
-			tr.addView(s);
-			tr.setGravity(Gravity.CENTER_VERTICAL);
-			dialogLayout.addView(tr);
-			break; }
+		dialogIds.add(name);
+		AppCompatEditText et = new AppCompatEditText(context);
+		// Ugly temporary hack: in custom game dialog, all text boxes are numeric, in the other two dialogs they aren't.
+		// Uglier temporary-er hack: Black Box must accept a range for ball count.
+		if (whichEvent == CFG_SETTINGS && !currentBackend.equals("blackbox")) {
+			et.setInputType(InputType.TYPE_CLASS_NUMBER
+					| InputType.TYPE_NUMBER_FLAG_DECIMAL
+					| InputType.TYPE_NUMBER_FLAG_SIGNED);
 		}
+		et.setTag(name);
+		et.setText(value);
+		et.setWidth(getResources().getDimensionPixelSize((whichEvent == CFG_SETTINGS)
+				? R.dimen.dialog_edit_text_width : R.dimen.dialog_long_edit_text_width));
+		et.setSelectAllOnFocus(true);
+		AppCompatTextView tv = new AppCompatTextView(context);
+		tv.setText(name);
+		tv.setPadding(0, 0, getResources().getDimensionPixelSize(R.dimen.dialog_padding_horizontal), 0);
+		tv.setGravity(Gravity.END);
+		TableRow tr = new TableRow(context);
+		tr.addView(tv);
+		tr.addView(et);
+		tr.setGravity(Gravity.CENTER_VERTICAL);
+		dialogLayout.addView(tr);
+		if (whichEvent == CFG_SEED && value.indexOf('#') == value.length() - 1) {
+			final AppCompatTextView seedWarning = new AppCompatTextView(context);
+			seedWarning.setText(R.string.seedWarning);
+			dialogLayout.addView(seedWarning);
+		}
+	}
+
+	@UsedByJNI
+	void dialogAddBoolean(int whichEvent, String name, boolean selected)
+	{
+		final Context context = dialogBuilder.getContext();
+		dialogIds.add(name);
+		AppCompatCheckBox c = new AppCompatCheckBox(context);
+		c.setTag(name);
+		c.setText(name);
+		c.setChecked(selected);
+		dialogLayout.addView(c);
+	}
+
+	@UsedByJNI
+	void dialogAddChoices(int whichEvent, String name, String value, int selection) {
+		final Context context = dialogBuilder.getContext();
+		StringTokenizer st = new StringTokenizer(value.substring(1), value.substring(0, 1));
+		ArrayList<String> choices = new ArrayList<>();
+		while (st.hasMoreTokens()) choices.add(st.nextToken());
+		dialogIds.add(name);
+		AppCompatSpinner s = new AppCompatSpinner(context);
+		s.setTag(name);
+		ArrayAdapter<String> a = new ArrayAdapter<>(context,
+				android.R.layout.simple_spinner_item, choices.toArray(new String[0]));
+		a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+		s.setAdapter(a);
+		s.setSelection(selection);
+		s.setLayoutParams(new TableRow.LayoutParams(
+				getResources().getDimensionPixelSize(R.dimen.dialog_spinner_width),
+				TableRow.LayoutParams.WRAP_CONTENT));
+		TextView tv = new TextView(context);
+		tv.setText(name);
+		tv.setPadding(0, 0, getResources().getDimensionPixelSize(R.dimen.dialog_padding_horizontal), 0);
+		tv.setGravity(Gravity.END);
+		TableRow tr = new TableRow(context);
+		tr.addView(tv);
+		tr.addView(s);
+		tr.setGravity(Gravity.CENTER_VERTICAL);
+		dialogLayout.addView(tr);
 	}
 
 	@UsedByJNI
@@ -1729,7 +1831,21 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 			applyKeyboardBorders();
 		} else if (key.equals(BRIDGES_SHOW_H_KEY) || key.equals(UNEQUAL_SHOW_H_KEY)) {
 			applyShowH();
+		} else if (key.equals(MOUSE_LONG_PRESS_KEY)) {
+			applyMouseLongPress();
+		} else if (key.equals(MOUSE_BACK_KEY)) {
+			applyMouseBackKey();
 		}
+	}
+
+	private void applyMouseLongPress() {
+		final String pref = prefs.getString(MOUSE_LONG_PRESS_KEY, "auto");
+		gameView.alwaysLongPress = "always".equals(pref);
+		gameView.hasRightMouse = "never".equals(pref);
+	}
+
+	private void applyMouseBackKey() {
+		gameView.mouseBackSupport = prefs.getBoolean(MOUSE_BACK_KEY, true);
 	}
 
 	private void applyKeyboardBorders() {
@@ -1847,10 +1963,12 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 	@UsedByJNI
 	void changedState(final boolean canUndo, final boolean canRedo) {
 		runOnUiThread(() -> {
-			undoEnabled = canUndo;
-			redoEnabled = canRedo;
+			undoEnabled = canUndo || undoToGame != null;
+			undoIsLoadGame = !canUndo && undoToGame != null;
+			redoEnabled = canRedo || redoToGame != null;
+			redoIsLoadGame = !canRedo && redoToGame != null;
 			if (keyboard != null) {
-				keyboard.setUndoRedoEnabled(canUndo, canRedo);
+				keyboard.setUndoRedoEnabled(undoEnabled, redoEnabled);
 			}
 			if (menu != null) {
 				MenuItem mi;
@@ -1866,6 +1984,18 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 				}
 			}
 		});
+	}
+
+	@UsedByJNI
+	void purgingStates()
+	{
+		redoToGame = null;
+	}
+
+	@UsedByJNI
+	boolean allowFlash()
+	{
+		return prefs.getBoolean(VICTORY_FLASH_KEY, true);
 	}
 
 	native void startPlaying(GameView _gameView, String savedGame);
@@ -1889,9 +2019,11 @@ public class GamePlay extends AppCompatActivity implements OnSharedPreferenceCha
 	native String getCurrentParams();
 	native void requestKeys(String backend, String params);
 	native void setCursorVisibility(boolean visible);
-	native String[] getPresets();
+	native MenuEntry[] getPresets();
 	native int getUIVisibility();
 	native void resetTimerBaseline();
+	native void purgeStates();
+	native boolean isCompletedNow();
 
 	static {
 		System.loadLibrary("puzzles");

@@ -46,6 +46,10 @@
 						  android:key="advancedSettings"
 						  android:persistent="false">
 			<PreferenceCategory android:title="@string/displaySettings">
+				<CheckBoxPreference android:title="@string/victoryFlash"
+									android:summary="@string/victoryFlashSummary"
+									android:key="victoryFlash"
+									android:defaultValue="true" />
 				<CheckBoxPreference android:title="@string/completedPrompt"
 									android:summary="@string/completedPromptSummary"
 									android:key="completedPrompt"
@@ -73,6 +77,17 @@
 									android:summary="@string/keyboardBordersSummary"
 									android:key="keyboardBorders"
 									android:defaultValue="false" />
+			</PreferenceCategory>
+			<PreferenceCategory android:title="@string/mouseSettings">
+				<ListPreference android:title="@string/extMouseLongPress"
+								android:key="extMouseLongPress"
+								android:entryValues="@array/extMouseLongPressModes"
+								android:entries="@array/extMouseLongPressModeDescs"
+								android:defaultValue="auto" />
+				<CheckBoxPreference android:title="@string/extMouseBackKey"
+									android:summary="@string/extMouseBackKeySummary"
+									android:key="extMouseBackKey"
+									android:defaultValue="true" />
 			</PreferenceCategory>
 		</PreferenceScreen>
 	</PreferenceCategory>

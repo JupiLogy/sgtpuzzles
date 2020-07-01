@@ -29,6 +29,8 @@ public class SmallKeyboard extends KeyboardView implements KeyboardView.OnKeyboa
 	public static final char SWAP_L_R_KEY = '*';
 	private boolean swapLR = false;
 	private final SharedPreferences state;
+	private int lastPress = -1;
+	private int releasesThisPress = 0;
 
 	enum ArrowMode {
 		NO_ARROWS,  // untangle
@@ -266,16 +268,18 @@ public class SmallKeyboard extends KeyboardView implements KeyboardView.OnKeyboa
 			key.height = mDefaultHeight;
 			key.gap = mDefaultHorizontalGap;
 			switch(c) {
-				case 'U':
+				case GameView.UI_UNDO: case 'U':
 					undoKey = mKeys.size() - 1;
 					key.repeatable = true;
 					setUndoRedoEnabled(ExtraKey.UNDO, undoEnabled);
-					break;
-				case 'R':
+					key.codes = new int[] { GameView.UI_UNDO };
+					return;
+				case GameView.UI_REDO: case 'R':
 					redoKey = mKeys.size() - 1;
 					key.repeatable = true;
 					setUndoRedoEnabled(ExtraKey.REDO, redoEnabled);
-					break;
+					key.codes = new int[] { GameView.UI_REDO };
+					return;
 				case '\b':
 					key.icon = trySpecificIcon(context.getResources(), R.drawable.sym_key_backspace);
 					key.repeatable = true;
@@ -606,8 +610,18 @@ public class SmallKeyboard extends KeyboardView implements KeyboardView.OnKeyboa
 	public void swipeDown() {}
 	public void swipeLeft() {}
 	public void swipeRight() {}
-	public void onPress(int k) {}
-	public void onRelease(int k) {}
+
+	public void onPress(int k) {
+		lastPress = k;
+		releasesThisPress = 0;
+	}
+
+	public void onRelease(int k) {
+		if (lastPress == k) {
+			releasesThisPress++;
+		}
+	}
+
 	public void onText(CharSequence s) {
 		for (int i=0; i<s.length();i++) parent.sendKey(0,0,s.charAt(i));
 	}
@@ -622,7 +636,7 @@ public class SmallKeyboard extends KeyboardView implements KeyboardView.OnKeyboa
 					key.on ? R.string.toast_swap_l_r_on : R.string.toast_swap_l_r_off);
 		} else {
 			if (!swapLR && "palisade".equals(backendForIcons) && "HJKL".indexOf(k) > -1) k = Character.toLowerCase(k);
-			parent.sendKey(0,0,k);
+			parent.sendKey(0,0, k, releasesThisPress > 0);
 		}
 	}
 }

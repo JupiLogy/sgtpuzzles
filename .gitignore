@@ -46,6 +46,7 @@ app/src/main/res/drawable-*/logo_ab*.png
 /magnetssolver
 /map
 /mapsolver
+/matching
 /mines
 /mineobfusc
 /net
@@ -117,8 +118,10 @@ app/src/main/res/drawable-*/logo_ab*.png
 /org
 /*.ppc
 /*.i386
+/*.x86_64
 /Puzzles.ppc.bin
 /Puzzles.i386.bin
+/Puzzles.x86_64.bin
 /version2.def
 /preprocessed.but
 /*.a

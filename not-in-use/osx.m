@@ -111,7 +111,7 @@ NSApplication *app;
  * clearly defined subsystem.
  */
 
-void fatal(char *fmt, ...)
+void fatal(const char *fmt, ...)
 {
     va_list ap;
     char errorbuf[2048];
@@ -152,13 +152,13 @@ void get_random_seed(void **randseed, int *randseedsize)
     *randseedsize = sizeof(time_t);
 }
 
-static void savefile_write(void *wctx, void *buf, int len)
+static void savefile_write(void *wctx, const void *buf, int len)
 {
     FILE *fp = (FILE *)wctx;
     fwrite(buf, 1, len, fp);
 }
 
-static int savefile_read(void *wctx, void *buf, int len)
+static bool savefile_read(void *wctx, void *buf, int len)
 {
     FILE *fp = (FILE *)wctx;
     int ret;
@@ -275,7 +275,7 @@ id initnewitem(NSMenuItem *item, NSMenu *parent, const char *title,
     return item;
 }
 
-NSMenuItem *newitem(NSMenu *parent, char *title, char *key,
+NSMenuItem *newitem(NSMenu *parent, const char *title, const char *key,
 		    id target, SEL action)
 {
     return initnewitem([NSMenuItem allocWithZone:[NSMenu menuZone]],
@@ -392,7 +392,7 @@ struct frontend {
     MyImageView *view;
     NSColor **colours;
     int ncolours;
-    int clipped;
+    bool clipped;
     int w, h;
 };
 
@@ -426,6 +426,9 @@ struct frontend {
     NSView **cfg_controls;
     int cfg_ncontrols;
     NSTextField *status;
+    struct preset_menu *preset_menu;
+    NSMenuItem **preset_menu_items;
+    int n_preset_menu_items;
 }
 - (id)initWithGame:(const game *)g;
 - (void)dealloc;
@@ -434,7 +437,7 @@ struct frontend {
 - (void)keyDown:(NSEvent *)ev;
 - (void)activateTimer;
 - (void)deactivateTimer;
-- (void)setStatusLine:(char *)text;
+- (void)setStatusLine:(const char *)text;
 - (void)resizeForNewGameParams;
 - (void)updateTypeMenuTick;
 @end
@@ -519,7 +522,7 @@ struct frontend {
     frame.origin.x = 0;
 
     w = h = INT_MAX;
-    midend_size(me, &w, &h, FALSE);
+    midend_size(me, &w, &h, false);
     frame.size.width = w;
     frame.size.height = h;
     fe.w = w;
@@ -540,6 +543,8 @@ struct frontend {
     int w, h;
 
     ourgame = g;
+    preset_menu = NULL;
+    preset_menu_items = NULL;
 
     fe.window = self;
 
@@ -552,7 +557,7 @@ struct frontend {
      */
     midend_new_game(me);
     w = h = INT_MAX;
-    midend_size(me, &w, &h, FALSE);
+    midend_size(me, &w, &h, false);
     rect.size.width = w;
     rect.size.height = h;
     fe.w = w;
@@ -618,6 +623,7 @@ struct frontend {
 	[fe.colours[i] release];
     }
     sfree(fe.colours);
+    sfree(preset_menu_items);
     midend_free(me);
     [super dealloc];
 }
@@ -648,23 +654,23 @@ struct frontend {
 	 * function key codes.
 	 */
 	if (c >= 0x80) {
-	    int mods = FALSE;
+	    bool mods = false;
 	    switch (c) {
 	      case NSUpArrowFunctionKey:
 		c = CURSOR_UP;
-		mods = TRUE;
+		mods = true;
 		break;
 	      case NSDownArrowFunctionKey:
 		c = CURSOR_DOWN;
-		mods = TRUE;
+		mods = true;
 		break;
 	      case NSLeftArrowFunctionKey:
 		c = CURSOR_LEFT;
-		mods = TRUE;
+		mods = true;
 		break;
 	      case NSRightArrowFunctionKey:
 		c = CURSOR_RIGHT;
-		mods = TRUE;
+		mods = true;
 		break;
 	      default:
 		continue;
@@ -680,6 +686,10 @@ struct frontend {
 
 	if (c >= '0' && c <= '9' && ([ev modifierFlags] & NSNumericPadKeyMask))
 	    c |= MOD_NUM_KEYPAD;
+
+        if (c == 26 &&
+            !((NSShiftKeyMask | NSControlKeyMask) & ~[ev modifierFlags]))
+            c = UI_REDO;
 
 	[self processKey:c];
     }
@@ -716,7 +726,7 @@ struct frontend {
     last_time = now;
 }
 
-- (void)showError:(char *)message
+- (void)showError:(const char *)message
 {
     NSAlert *alert;
 
@@ -729,7 +739,7 @@ struct frontend {
 
 - (void)newGame:(id)sender
 {
-    [self processKey:'n'];
+    [self processKey:UI_NEWGAME];
 }
 - (void)restartGame:(id)sender
 {
@@ -740,7 +750,7 @@ struct frontend {
     NSSavePanel *sp = [NSSavePanel savePanel];
 
     if ([sp runModal] == NSFileHandlingPanelOKButton) {
-       const char *name = [[sp filename] UTF8String];
+       const char *name = [[sp URL] fileSystemRepresentation];
 
         FILE *fp = fopen(name, "w");
 
@@ -760,26 +770,10 @@ struct frontend {
 
     [op setAllowsMultipleSelection:NO];
 
-    if ([op runModalForTypes:nil] == NSOKButton) {
-        /*
-         * This used to be
-         *
-         *    [[[op filenames] objectAtIndex:0] cString]
-         *
-         * but the plain cString method became deprecated and Xcode 7
-         * started complaining about it. Since OS X 10.9 we can
-         * apparently use the more modern API
-         *
-         *    [[[op URLs] objectAtIndex:0] fileSystemRepresentation]
-         *
-         * but the alternative below still compiles with Xcode 7 and
-         * is a bit more backwards compatible, so I'll try it for the
-         * moment.
-         */
-	const char *name = [[[op filenames] objectAtIndex:0]
-                               cStringUsingEncoding:
-                                   [NSString defaultCStringEncoding]];
-	char *err;
+    if ([op runModal] == NSOKButton) {
+	const char *name = [[[op URLs] objectAtIndex:0]
+                               fileSystemRepresentation];
+	const char *err;
 
         FILE *fp = fopen(name, "r");
 
@@ -803,11 +797,11 @@ struct frontend {
 }
 - (void)undoMove:(id)sender
 {
-    [self processKey:'u'];
+    [self processKey:UI_UNDO];
 }
 - (void)redoMove:(id)sender
 {
-    [self processKey:'r'&0x1F];
+    [self processKey:UI_REDO];
 }
 
 - (void)copy:(id)sender
@@ -826,7 +820,7 @@ struct frontend {
 
 - (void)solveGame:(id)sender
 {
-    char *msg;
+    const char *msg;
 
     msg = midend_solve(me);
 
@@ -847,54 +841,99 @@ struct frontend {
 
 - (void)clearTypeMenu
 {
+    int i;
+
     while ([typemenu numberOfItems] > 1)
 	[typemenu removeItemAtIndex:0];
     [[typemenu itemAtIndex:0] setState:NSOffState];
+
+    for (i = 0; i < n_preset_menu_items; i++)
+        preset_menu_items[i] = NULL;
 }
 
 - (void)updateTypeMenuTick
 {
-    int i, total, n;
+    int i, n;
 
-    total = [typemenu numberOfItems];
     n = midend_which_preset(me);
-    if (n < 0)
-	n = total - 1;		       /* that's always where "Custom" lives */
-    for (i = 0; i < total; i++)
-	[[typemenu itemAtIndex:i] setState:(i == n ? NSOnState : NSOffState)];
+
+    for (i = 0; i < n_preset_menu_items; i++)
+        if (preset_menu_items[i])
+            [preset_menu_items[i] setState:(i == n ? NSOnState : NSOffState)];
+
+    /*
+     * The Custom menu item is always right at the bottom of the
+     * Type menu.
+     */
+    [[typemenu itemAtIndex:[typemenu numberOfItems]-1]
+             setState:(n < 0 ? NSOnState : NSOffState)];
+}
+
+- (void)populateTypeMenu:(NSMenu *)nsmenu from:(struct preset_menu *)menu
+{
+    int i;
+
+    /*
+     * We process the entries in reverse order so that (in the
+     * top-level Type menu at least) we don't disturb the 'Custom'
+     * item which remains fixed even when we change back and forth
+     * between puzzle type windows.
+     */
+    for (i = menu->n_entries; i-- > 0 ;) {
+        struct preset_menu_entry *entry = &menu->entries[i];
+        NSMenuItem *item;
+
+        if (entry->params) {
+            DataMenuItem *ditem;
+            ditem = [[[DataMenuItem alloc]
+                        initWithTitle:[NSString stringWithUTF8String:
+                                                    entry->title]
+                               action:NULL keyEquivalent:@""]
+                       autorelease];
+
+            [ditem setTarget:self];
+            [ditem setAction:@selector(presetGame:)];
+            [ditem setPayload:entry->params];
+
+            preset_menu_items[entry->id] = ditem;
+
+            item = ditem;
+        } else {
+            NSMenu *nssubmenu;
+
+            item = [[[NSMenuItem alloc]
+                        initWithTitle:[NSString stringWithUTF8String:
+                                                    entry->title]
+                               action:NULL keyEquivalent:@""]
+                       autorelease];
+            nssubmenu = newmenu(entry->title);
+            [item setSubmenu:nssubmenu];
+
+            [self populateTypeMenu:nssubmenu from:entry->submenu];
+        }
+
+        [item setEnabled:YES];
+        [nsmenu insertItem:item atIndex:0];
+    }
 }
 
 - (void)becomeKeyWindow
 {
-    int n;
-
     [self clearTypeMenu];
 
     [super becomeKeyWindow];
 
-    n = midend_num_presets(me);
+    if (!preset_menu) {
+        int i;
+        preset_menu = midend_get_presets(me, &n_preset_menu_items);
+        preset_menu_items = snewn(n_preset_menu_items, NSMenuItem *);
+        for (i = 0; i < n_preset_menu_items; i++)
+            preset_menu_items[i] = NULL;
+    }
 
-    if (n > 0) {
+    if (preset_menu->n_entries > 0) {
 	[typemenu insertItem:[NSMenuItem separatorItem] atIndex:0];
-	while (n--) {
-	    char *name;
-	    game_params *params;
-	    DataMenuItem *item;
-
-	    midend_fetch_preset(me, n, &name, &params);
-
-	    item = [[[DataMenuItem alloc]
-		     initWithTitle:[NSString stringWithUTF8String:name]
-		     action:NULL keyEquivalent:@""]
-		    autorelease];
-
-	    [item setEnabled:YES];
-	    [item setTarget:self];
-	    [item setAction:@selector(presetGame:)];
-	    [item setPayload:params];
-
-	    [typemenu insertItem:item atIndex:0];
-	}
+        [self populateTypeMenu:typemenu from:preset_menu];
     }
 
     [self updateTypeMenuTick];
@@ -918,7 +957,7 @@ struct frontend {
     int w, h;
 
     w = h = INT_MAX;
-    midend_size(me, &w, &h, FALSE);
+    midend_size(me, &w, &h, false);
     size.width = w;
     size.height = h;
     fe.w = w;
@@ -1048,7 +1087,8 @@ struct frontend {
 	    [tf setEditable:YES];
 	    [tf setSelectable:YES];
 	    [tf setBordered:YES];
-	    [[tf cell] setTitle:[NSString stringWithUTF8String:i->sval]];
+	    [[tf cell] setTitle:[NSString
+                                    stringWithUTF8String:i->u.string.sval]];
 	    [tf sizeToFit];
 	    rect = [tf frame];
 	    /*
@@ -1077,7 +1117,7 @@ struct frontend {
 	    [b setButtonType:NSSwitchButton];
 	    [b setTitle:[NSString stringWithUTF8String:i->name]];
 	    [b sizeToFit];
-	    [b setState:(i->ival ? NSOnState : NSOffState)];
+	    [b setState:(i->u.boolean.bval ? NSOnState : NSOffState)];
 	    rect = [b frame];
 	    if (totalw < rect.size.width + 1) totalw = rect.size.width + 1;
 	    if (thish < rect.size.height + 1) thish = rect.size.height + 1;
@@ -1106,12 +1146,14 @@ struct frontend {
 	    pb = [[NSPopUpButton alloc] initWithFrame:tmprect pullsDown:NO];
 	    [pb setBezelStyle:NSRoundedBezelStyle];
 	    {
-		char c, *p;
+		char c;
+                const char *p;
 
-		p = i->sval;
+		p = i->u.choices.choicenames;
 		c = *p++;
 		while (*p) {
-		    char *q, *copy;
+		    const char *q;
+                    char *copy;
 
 		    q = p;
 		    while (*p && *p != c) p++;
@@ -1125,7 +1167,7 @@ struct frontend {
 		    if (*p) p++;
 		}
 	    }
-	    [pb selectItemAtIndex:i->ival];
+	    [pb selectItemAtIndex:i->u.choices.selected];
 	    [pb sizeToFit];
 
 	    rect = [pb frame];
@@ -1233,7 +1275,7 @@ struct frontend {
     [self startConfigureSheet:CFG_SETTINGS];
 }
 
-- (void)sheetEndWithStatus:(BOOL)update
+- (void)sheetEndWithStatus:(bool)update
 {
     assert(sheet != NULL);
     [app endSheet:sheet];
@@ -1242,23 +1284,24 @@ struct frontend {
     if (update) {
 	int k;
 	config_item *i;
-	char *error;
+	const char *error;
 
 	k = 0;
 	for (i = cfg; i->type != C_END; i++) {
 	    switch (i->type) {
 	      case C_STRING:
-		sfree(i->sval);
-		i->sval = dupstr([[[(id)cfg_controls[k+1] cell]
+		sfree(i->u.string.sval);
+		i->u.string.sval = dupstr([[[(id)cfg_controls[k+1] cell]
                                   title] UTF8String]);
 		k += 2;
 		break;
 	      case C_BOOLEAN:
-		i->ival = [(id)cfg_controls[k] state] == NSOnState;
+		i->u.boolean.bval = [(id)cfg_controls[k] state] == NSOnState;
 		k++;
 		break;
 	      case C_CHOICES:
-		i->ival = [(id)cfg_controls[k+1] indexOfSelectedItem];
+		i->u.choices.selected =
+                    [(id)cfg_controls[k+1] indexOfSelectedItem];
 		k += 2;
 		break;
 	    }
@@ -1282,14 +1325,14 @@ struct frontend {
 }
 - (void)sheetOKButton:(id)sender
 {
-    [self sheetEndWithStatus:YES];
+    [self sheetEndWithStatus:true];
 }
 - (void)sheetCancelButton:(id)sender
 {
-    [self sheetEndWithStatus:NO];
+    [self sheetEndWithStatus:false];
 }
 
-- (void)setStatusLine:(char *)text
+- (void)setStatusLine:(const char *)text
 {
     [[status cell] setTitle:[NSString stringWithUTF8String:text]];
 }
@@ -1402,7 +1445,8 @@ static void osx_draw_rect(void *handle, int x, int y, int w, int h, int colour)
     NSRectFill(r);
 }
 static void osx_draw_text(void *handle, int x, int y, int fonttype,
-			  int fontsize, int align, int colour, char *text)
+			  int fontsize, int align, int colour,
+                          const char *text)
 {
     frontend *fe = (frontend *)handle;
     NSString *string = [NSString stringWithUTF8String:text];
@@ -1533,27 +1577,27 @@ static void osx_clip(void *handle, int x, int y, int w, int h)
     if (!fe->clipped)
 	[[NSGraphicsContext currentContext] saveGraphicsState];
     [NSBezierPath clipRect:r];
-    fe->clipped = TRUE;
+    fe->clipped = true;
 }
 static void osx_unclip(void *handle)
 {
     frontend *fe = (frontend *)handle;
     if (fe->clipped)
 	[[NSGraphicsContext currentContext] restoreGraphicsState];
-    fe->clipped = FALSE;
+    fe->clipped = false;
 }
 static void osx_start_draw(void *handle)
 {
     frontend *fe = (frontend *)handle;
     [fe->image lockFocus];
-    fe->clipped = FALSE;
+    fe->clipped = false;
 }
 static void osx_end_draw(void *handle)
 {
     frontend *fe = (frontend *)handle;
     [fe->image unlockFocus];
 }
-static void osx_status_bar(void *handle, char *text)
+static void osx_status_bar(void *handle, const char *text)
 {
     frontend *fe = (frontend *)handle;
     [fe->window setStatusLine:text];

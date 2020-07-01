@@ -59,6 +59,8 @@ Version %s"</string>
     <string name="file_exists">File exists; overwrite it?</string>
     <string name="file_saved">Saved the game in {0}</string>
     <string name="replaceGame">You have an unfinished game of {0} which this will replace. Continue loading?</string>
+    <string name="undo_new_game_toast">Undoing into previous game</string>
+	<string name="redo_new_game_toast">Redoing into previously generated game</string>
     <string name="storage_permission_explanation">"To import this file an extra permission is needed. Android might describe this permission in terms of photos and media.
 
 If you don’t want to grant it you can instead locate the file from within Puzzles using the Open button on the game chooser."</string>
@@ -76,6 +78,8 @@ If you don’t want to grant it you can instead locate the file from within Puzz
     <!-- "Completed" dialog -->
     <string name="completedPrompt">Buttons when a game is completed</string>
     <string name="completedPromptSummary">Shortcuts to start a new or different game</string>
+    <string name="victoryFlash">Animations when a game is completed</string>
+    <string name="victoryFlashSummary">Victory flash</string>
     <string name="Change_type">Change type</string>
     <!-- Chooser -->
     <string name="games_starred">Starred (long press to toggle)</string>
@@ -115,10 +119,11 @@ If you don’t want to grant it you can instead locate the file from within Puzz
     <string name="chooserStyleGrid">Icons only (compact)</string>
     <string name="thisGame">This game</string>
     <string name="allGames">All games</string>
-    <string name="advancedSettings">Display and keyboard</string>
+    <string name="advancedSettings">Display and input</string>
     <string name="advancedSettingsSummary">Less frequently changed settings</string>
     <string name="displaySettings">Display</string>
     <string name="keyboardSettings">Keyboard</string>
+    <string name="mouseSettings">Mouse/Stylus</string>
     <string name="arrowKeysIn">Arrow keys in {0}</string>
     <string name="arrowKeysUnavailable">Arrow keys unavailable</string>
     <string name="arrowKeysUnavailableIn">Arrow keys unavailable in {0}</string>
@@ -143,6 +148,12 @@ If you don’t want to grant it you can instead locate the file from within Puzz
     <string name="undoRedoOnKeyboardSummary">Allows auto repeat (otherwise in action bar)</string>
     <string name="keyboardBorders">Show edges of keys</string>
     <string name="keyboardBordersSummary">Otherwise only symbols are shown</string>
+    <string name="extMouseLongPress">Use long-press with mouse/stylus</string>
+    <string name="extMouseLongPressNever">Never (only use devices with a right/alt button)</string>
+    <string name="extMouseLongPressAuto">Auto (disable when a right/alt click is detected)</string>
+    <string name="extMouseLongPressAlways">Always (same behavior as finger presses)</string>
+    <string name="extMouseBackKey">Support right mouse button</string>
+    <string name="extMouseBackKeySummary">"Override \"Back\" functionality of right button in puzzles"</string>
     <string name="bridgesShowH">Show “H” in Bridges"</string>
     <string name="bridgesShowHSummary">Undocumented &#8220;solve from here&#8221; action</string>
     <string name="unequalShowH">Show “H” in Unequal</string>
